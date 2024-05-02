@@ -10,8 +10,9 @@ export class UploadService {
   constructor(
     @InjectModel(UploadEntity.name)
     private readonly fileModel: Model<UploadEntity>,
-    @Inject('MESSAGE_BROKER') private readonly messageBroker: ClientProxy,
-  ) {}
+    @Inject('MESSAGE_BROKER')
+    private readonly messageBroker: ClientProxy,
+  ) { }
 
   async uploadFiles(fileDtos: UploadDto[]): Promise<void> {
     for (const fileDto of fileDtos) {

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import io, {Socket} from 'socket.io-client';
+import React, { useState } from 'react';
 import axios, { AxiosError, AxiosProgressEvent } from 'axios';
-import FileUploadProgress from './FileUploadProgress';
 
 interface FileUploadStatus {
   id: string;
@@ -16,23 +16,23 @@ const App: React.FC = () => {
   const [files, setFiles] = useState<FileList | null>(null);
   const [fileUploads, setFileUploads] = useState<FileUploadStatus[]>([]);
   const [totalProgress, setTotalProgress] = useState(0);
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadSuccess, setUploadSuccess] = useState(false);
 
-  useEffect(() => {
-    const fetchInitialProgress = async () => {
-      try {
-        const response = await axios.get<{ progress: number }>(`http://localhost:3000/upload/${fileUploads[0]?.id}/progress`);
-        const initialProgress = response.data.progress;
+  const connectWebSocket = () => {
+    const socketIo = io('http://localhost:3000');
+    setSocket(socketIo);
 
-        setFileUploads((prevFileUploads) =>
-          prevFileUploads.map((item) => ({ ...item, progress: initialProgress }))
-        );
-
-      } catch (error) {
-        console.info('Error fetching initial progress:', error);
-      }
-    };
-    fetchInitialProgress();
-  }, [fileUploads]);
+    socketIo.on('uploadProgress', (data: { fileId: string; progress: number }) => {
+      setFileUploads((prevFileUploads) =>
+        prevFileUploads.map((item) =>
+          item.id === data.fileId ? { ...item, progress: data.progress } : item
+        )
+      );
+    });
+    return socketIo;      
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -79,6 +79,7 @@ const App: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (files) {
+      setUploading(true);
       for (let i = 0; i < files.length; i++) {
         const formData = new FormData();
         formData.append('files', files[i]);
@@ -94,35 +95,67 @@ const App: React.FC = () => {
         try {
           await axios.post('http://localhost:3000/upload', formData, config);
           handleUploadSuccess(files[i]);
+
+          const socketIo = connectWebSocket();
+
+          socketIo.disconnect();
+          setUploading(false); 
+        setUploadSuccess(true)
         } catch (error) {
           handleUploadError(files[i], error as AxiosError<any>);
+          setUploading(false);
         }
       }
     }
   };
 
   return (
-    <div className="container mx-auto mt-10">
-      <form onSubmit={handleSubmit}>
-        <input type="file" name="files" multiple onChange={handleFileChange} />
-        <button
-          type="submit"
-          className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 mt-4 rounded"
-        >
-          Upload
-        </button>
-      </form>
-      {fileUploads.map((item, index) => (
-        <div key={index} className="mt-4">
-          <FileUploadProgress
-            bytesProcessed={item.bytesProcessed}
-            fileSize={item.file.size}
-            totalProgress={totalProgress}
-          />
-          {item.success && <p style={{ color: 'green' }}>Upload successful</p>}
-          {item.error && <p style={{ color: 'red' }}>Error: {item.error}</p>}
-        </div>
-      ))}
+    <div className="container mx-auto mt-10 flex flex-col justify-center items-center h-screen">
+      {!uploadSuccess && (
+        <form onSubmit={handleSubmit}>
+          <input type="file" name="files" multiple onChange={handleFileChange} />
+          <button
+            type="submit"
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold m-4 py-2 px-4 mt-4 rounded"
+          >
+            Upload
+          </button>
+        </form>
+      )}
+
+     <div className="mt-8 p-8 text-center">
+        {
+          uploading && 
+          <p className="text-2xl font-bold text-yellow-500">
+            Arquivos sendo enviados. Você pode continuar navegando pelo aplicativo.
+          </p>
+        }
+      </div>
+      
+      <div className="fixed bottom-0 right-0 m-4">
+        {fileUploads.map((fileUpload) => (
+          <div key={fileUpload.id} className="mt-4">
+            <div className="relative">
+              {fileUpload.success ? (
+                <div className="bg-green-500 text-white p-2 rounded">
+                  Upload concluído com sucesso!
+                </div>
+              ) : (
+                <div className="bg-blue-400 text-white p-2 rounded animate-pulse">
+                  Enviando...
+                </div>
+              )}
+              {fileUpload.file.name} -{' '}
+              {fileUpload.error && <p style={{ color: 'red' }}>{fileUpload.error}</p>}
+              {fileUpload.progress !== undefined && (
+                <progress value={fileUpload.progress} max="100">
+                  {fileUpload.progress}%
+                </progress>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
